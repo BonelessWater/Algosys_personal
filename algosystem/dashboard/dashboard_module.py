@@ -1544,6 +1544,15 @@ def launch_dashboard():
             self.plot_registry = PlotRegistry()  # Registry of available chart types
             self.data_manager = DataManager()    # Handles loading and preprocessing data
             
+            self.config_file_path = os.path.abspath(os.path.join(
+                os.path.dirname(__file__),
+                "..",
+                "backtesting",
+                "dashboard",
+                "utils",
+                "graph_config.json"
+            ))
+
             # Set up the main layout
             self.central_widget = QWidget()
             self.setCentralWidget(self.central_widget)
@@ -1600,13 +1609,6 @@ def launch_dashboard():
             
             self.main_layout.addWidget(self.splitter)
             
-            # Load configuration from environment variable if available
-            self.load_config_from_env()
-            
-            # Load data from directory if available
-            self.load_data_from_env()
-            
-        # ADDING MISSING METHODS
         def load_data(self):
             """Load data from a file and add it to the data manager."""
             # Open file dialog to select data file
@@ -1709,13 +1711,15 @@ def launch_dashboard():
                     
                     # Save configuration to file
                     with open(file_path, 'w') as f:
-                        import json
                         json.dump(dashboard_config, f, indent=4)
+                    
+                    # Also update the system config file
+                    self.update_system_config(dashboard_config)
                     
                     QMessageBox.information(
                         self,
                         "Save Complete",
-                        f"Dashboard configuration saved to {os.path.basename(file_path)}"
+                        f"Dashboard configuration saved to {os.path.basename(file_path)} and system config updated"
                     )
                 except Exception as e:
                     QMessageBox.critical(
@@ -1762,48 +1766,171 @@ def launch_dashboard():
                         f"An error occurred while loading the configuration: {str(e)}"
                     )
 
-        def load_config_from_env(self):
-            """Load configuration from environment variable."""
-            config_path = os.environ.get('ALGO_DASHBOARD_CONFIG')
-            if config_path and os.path.exists(config_path):
+        def load_config_from_file(self):
+            """Load configuration from the system config file."""
+            if os.path.exists(self.config_file_path):
                 try:
-                    # Load configuration from file
-                    with open(config_path, 'r') as f:
-                        import json
-                        dashboard_config = json.load(f)
-                    
-                    # Apply configuration to dashboard area
-                    self.dashboard_area.load_dashboard_config(dashboard_config)
-                    
-                    print(f"Loaded configuration from environment variable: {config_path}")
+                    with open(self.config_file_path, 'r') as f:
+                        self.system_config = json.load(f)
                 except Exception as e:
-                    print(f"Error loading configuration from environment: {e}")
+                    print(f"Error loading system configuration: {e}")
+                    self.system_config = self.create_default_config()
+            else:
+                self.system_config = self.create_default_config()
 
-        def load_data_from_env(self):
-            """Load data from directory specified in environment variable."""
-            data_dir = os.environ.get('ALGO_DASHBOARD_DATA_DIR')
-            if data_dir and os.path.exists(data_dir):
+        def create_default_config(self):
+            """Create a default configuration if none exists."""
+            return {
+                        "metrics": [
+                        {
+                            "id": "annual_return",
+                            "type": "Percentage",
+                            "title": "Annualized Return",
+                            "value_key": "annual_return",
+                            "position": {
+                            "row": 0,
+                            "col": 0
+                            }
+                        },
+                        {
+                            "id": "volatility",
+                            "type": "Percentage",
+                            "title": "Volatility",
+                            "value_key": "volatility",
+                            "position": {
+                            "row": 0,
+                            "col": 1
+                            }
+                        },
+                        {
+                            "id": "sharpe_ratio",
+                            "type": "Value",
+                            "title": "Sharpe Ratio",
+                            "value_key": "sharpe_ratio",
+                            "position": {
+                            "row": 0,
+                            "col": 2
+                            }
+                        },
+                        {
+                            "id": "max_drawdown",
+                            "type": "Percentage",
+                            "title": "Max Drawdown",
+                            "value_key": "max_drawdown",
+                            "position": {
+                            "row": 0,
+                            "col": 3
+                            }
+                        }
+                        ],
+                        "charts": [
+                        {
+                            "id": "equity_curve",
+                            "type": "LineChart",
+                            "title": "Equity Curve",
+                            "data_key": "equity",
+                            "position": {
+                            "row": 1,
+                            "col": 0
+                            },
+                            "config": {
+                            "y_axis_label": "Value ($)"
+                            }
+                        },
+                        {
+                            "id": "monthly_returns",
+                            "type": "HeatmapTable",
+                            "title": "Monthly Returns Heatmap",
+                            "data_key": "monthly_returns",
+                            "position": {
+                            "row": 2,
+                            "col": 0
+                            },
+                            "config": {}
+                        },
+                        {
+                            "id": "rolling_sharpe",
+                            "type": "LineChart",
+                            "title": "Rolling Sharpe Ratio",
+                            "data_key": "rolling_sharpe",
+                            "position": {
+                            "row": 2,
+                            "col": 1
+                            },
+                            "config": {
+                            "y_axis_label": "Sharpe Ratio",
+                            "window_size": 252
+                            }
+                        }
+                        ],
+                        "layout": {
+                        "max_cols": 2,
+                        "title": "AlgoSystem Trading Dashboard"
+                        }
+                    }
+
+        def update_system_config(self, dashboard_config):
+            """Update the system config file with the new dashboard configuration."""
+            if os.path.exists(self.config_file_path):
                 try:
-                    # Look for CSV files in the directory
-                    import glob
-                    csv_files = glob.glob(os.path.join(data_dir, "*.csv"))
+                    # Convert dashboard config to system config format
+                    system_config = self.convert_to_system_config(dashboard_config)
                     
-                    for csv_file in csv_files:
-                        source_name = self.data_manager.load_csv(csv_file)
-                        if source_name:
-                            print(f"Loaded data from: {csv_file}")
+                    # Write to system config file
+                    with open(self.config_file_path, 'w') as f:
+                        json.dump(system_config, f, indent=2)
                     
-                    # Update data source selector
-                    self.update_data_sources()
-                    
-                    # Select the first data source if available
-                    if self.data_source_selector.count() > 0:
-                        self.data_source_selector.setCurrentIndex(0)
-                        
-                    print(f"Loaded data from environment variable directory: {data_dir}")
+                    print(f"Updated system configuration at: {self.config_file_path}")
                 except Exception as e:
-                    print(f"Error loading data from environment: {e}")
-    
+                    print(f"Error updating system configuration: {e}")
+
+        def convert_to_system_config(self, dashboard_config):
+            """Convert dashboard config to system config format."""
+            # This method needs to transform the dashboard config format
+            # to match the format expected in graph_config.json
+            
+            system_config = {
+                "metrics": [],
+                "charts": [],
+                "layout": {
+                    "max_cols": dashboard_config.get("max_cols", 2),
+                    "title": "AlgoSystem Trading Dashboard"
+                }
+            }
+            
+            # Convert plots to charts
+            for plot_config in dashboard_config.get("plots", []):
+                chart_type = plot_config.get("type")
+                
+                # Skip if no type
+                if not chart_type:
+                    continue
+                
+                # Determine if this is a metric or chart
+                if chart_type in ["Percentage", "Value", "Currency"]:
+                    # This is a metric
+                    metric = {
+                        "id": plot_config.get("id"),
+                        "type": chart_type,
+                        "title": plot_config.get("title", "Metric"),
+                        "value_key": plot_config.get("data_key", "value"),
+                        "position": plot_config.get("position", {"row": 0, "col": 0})
+                    }
+                    system_config["metrics"].append(metric)
+                else:
+                    # This is a chart
+                    chart = {
+                        "id": plot_config.get("id"),
+                        "type": chart_type,
+                        "title": plot_config.get("title", "Chart"),
+                        "data_key": plot_config.get("data_key", "data"),
+                        "position": plot_config.get("position", {"row": 0, "col": 0}),
+                        "config": plot_config.get("config", {})
+                    }
+                    system_config["charts"].append(chart)
+            
+            return system_config
+
     # Create and run the application
     app = QApplication(sys.argv)
     dashboard = DashboardApp()
