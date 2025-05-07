@@ -1,18 +1,9 @@
 import pandas as pd
 import numpy as np
 import os
-import shutil
-import json
-import webbrowser
 import matplotlib.pyplot as plt
 
 from algosystem.utils._logging import get_logger
-from algosystem.backtesting.visualization import (
-    create_equity_chart,
-    create_drawdown_chart,
-    create_monthly_returns_heatmap,
-    create_rolling_sharpe_chart
-)
 
 from algosystem.backtesting import metrics
 
@@ -133,62 +124,6 @@ class Engine:
         logger.info("Performance Metrics:")
         for key, value in metrics.items():
             logger.info(f"{key}: {value}")
-    
-    def get_plots(self, output_path=None, show_charts=True):
-        """
-        Generate, save, and return performance plots.
-
-        Parameters:
-        -----------
-        output_path : str, optional
-            Directory in which to save the plots.
-            If not provided, defaults to a subfolder named 'plots' in the current working directory.
-        show_charts : bool, optional
-            If True, display the charts interactively. If False, the charts will not be shown.
-
-        Returns:
-        --------
-        plots : dict
-            Dictionary containing matplotlib figure objects for each plot.
-        """
-        # Extract the equity series from the results for those plots that require it:
-        equity_series = self.results['equity']
-
-        equity_chart = create_equity_chart(equity_series)
-        drawdown_chart = create_drawdown_chart(equity_series)
-        monthly_returns_heatmap = create_monthly_returns_heatmap(equity_series)
-        rolling_sharpe_chart = create_rolling_sharpe_chart(equity_series)
-
-        plots = {
-            'equity_chart': equity_chart,
-            'drawdown_chart': drawdown_chart,
-            'monthly_returns_heatmap': monthly_returns_heatmap,
-            'rolling_sharpe_chart': rolling_sharpe_chart
-        }
-
-        # Set default output path if none provided; default to "./plots"
-        if output_path is None:
-            output_path = os.path.join(os.getcwd(), "plots")
-        else:
-            output_path = os.path.abspath(output_path)
-
-        # Create the directory if it doesn't exist.
-        os.makedirs(output_path, exist_ok=True)
-
-        # Save each plot to a separate PNG file.
-        for key, fig in plots.items():
-            file_path = os.path.join(output_path, f"{key}.png")
-            fig.savefig(file_path)
-            print(f"Saved {key} to {file_path}")
-
-        # If show_charts is True, display the plots interactively.
-        if show_charts:
-            # Turn interactive mode off to force blocking behavior.
-            plt.ioff()
-            # This call will block until all open figure windows are closed.
-            plt.show(block=True)
-
-        return plots
     
     def _format_time_series(self, series):
         """Format a time series for the dashboard"""
