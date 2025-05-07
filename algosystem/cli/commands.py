@@ -1,3 +1,5 @@
+# File: algosystem/cli/commands.py (updated)
+
 import os
 import sys
 import click
@@ -17,10 +19,14 @@ def cli():
               help='Path to a dashboard configuration file to load')
 @click.option('--data-dir', '-d', type=click.Path(exists=True),
               help='Directory containing data files to preload')
-def launch(config, data_dir):
+@click.option('--host', type=str, default='127.0.0.1',
+              help='Host to run the dashboard editor server on (default: 127.0.0.1)')
+@click.option('--port', type=int, default=5000,
+              help='Port to run the dashboard editor server on (default: 5000)')
+@click.option('--debug', is_flag=True, default=False,
+              help='Run the server in debug mode')
+def launch(config, data_dir, host, port, debug):
     """Launch the AlgoSystem Dashboard UI."""
-    from algosystem.dashboard.dashboard_module import launch_dashboard
-    
     # Set environment variables for config and data if provided
     if config:
         os.environ['ALGO_DASHBOARD_CONFIG'] = os.path.abspath(config)
@@ -28,13 +34,18 @@ def launch(config, data_dir):
     if data_dir:
         os.environ['ALGO_DASHBOARD_DATA_DIR'] = os.path.abspath(data_dir)
     
-    # Launch the dashboard
-    launch_dashboard()
+    # Launch the dashboard web editor
+    from algosystem.backtesting.dashboard.web_app.app import start_dashboard_editor
+    click.echo(f"Starting AlgoSystem Dashboard Editor on http://{host}:{port}/")
+    click.echo("Press Ctrl+C to stop the server.")
+    start_dashboard_editor(host=host, port=port, debug=debug)
 
 @cli.command()
 @click.argument('input_file', type=click.Path(exists=True))
 @click.argument('output_file', type=click.Path())
-def render(input_file, output_file,):
+@click.option('--config', '-c', type=click.Path(exists=True),
+              help='Path to a custom dashboard configuration file')
+def render(input_file, output_file, config):
     """
     Render a dashboard from a configuration file and CSV data.
     
@@ -47,7 +58,13 @@ def render(input_file, output_file,):
     from algosystem.backtesting.engine import Engine
     
     # Load the dashboard configuration
-    with open('algosystem/utils/graph_config.json', 'r') as f:
+    config_path = config
+    if not config_path:
+        # Use default config path
+        from algosystem.backtesting.dashboard.web_app.app import DEFAULT_CONFIG_PATH
+        config_path = DEFAULT_CONFIG_PATH
+    
+    with open(config_path, 'r') as f:
         dashboard_config = json.load(f)
     
     # Load the CSV data
@@ -74,14 +91,14 @@ def render(input_file, output_file,):
         sys.exit(1)
     
     # Determine the dashboard grid size
-    if 'dashboard' in dashboard_config and 'max_cols' in dashboard_config['dashboard']:
-        max_cols = dashboard_config['dashboard']['max_cols']
+    if 'layout' in dashboard_config and 'max_cols' in dashboard_config['layout']:
+        max_cols = dashboard_config['layout']['max_cols']
     else:
         max_cols = 2
     
     # Count plots to determine grid size
-    if 'dashboard' in dashboard_config and 'plots' in dashboard_config['dashboard']:
-        plots = dashboard_config['dashboard']['plots']
+    if 'charts' in dashboard_config:
+        plots = dashboard_config['charts']
         num_plots = len(plots)
     else:
         print("No plots defined in configuration file")
@@ -125,7 +142,7 @@ def render(input_file, output_file,):
         title = plot_config.get('title', plot_type)
         
         # Create the appropriate plot based on type
-        if plot_type == 'Equity Curve':
+        if plot_type == 'LineChart' and plot_config.get('data_key') == 'equity':
             equity = results['equity']
             ax.plot(equity, label='Strategy')
             ax.set_title(title)
@@ -133,7 +150,7 @@ def render(input_file, output_file,):
             ax.set_ylabel('Equity ($)')
             ax.grid(alpha=0.3)
         
-        elif plot_type == 'Drawdown Chart':
+        elif plot_type == 'LineChart' and plot_config.get('data_key') == 'drawdown':
             # Calculate drawdown
             equity = results['equity']
             returns = equity.pct_change().dropna()
@@ -148,7 +165,7 @@ def render(input_file, output_file,):
             ax.set_ylabel('Drawdown (%)')
             ax.grid(alpha=0.3)
         
-        elif plot_type == 'Monthly Returns Heatmap':
+        elif plot_type == 'HeatmapTable' and plot_config.get('data_key') == 'monthly_returns':
             equity = results['equity']
             monthly_returns = equity.resample('M').last().pct_change().dropna()
             returns_matrix = monthly_returns.groupby(
@@ -161,7 +178,7 @@ def render(input_file, output_file,):
             ax.set_xlabel('Month')
             ax.set_ylabel('Year')
         
-        elif plot_type == 'Rolling Sharpe Ratio':
+        elif plot_type == 'LineChart' and plot_config.get('data_key') == 'rolling_sharpe':
             equity = results['equity']
             returns = equity.pct_change().dropna()
             window = plot_config.get('config', {}).get('window_size', 252)
@@ -213,58 +230,12 @@ def create_config(output_dir):
     
     OUTPUT_DIR: Directory to save the sample configuration
     """
+    # Load the default configuration
+    from algosystem.backtesting.dashboard.web_app.app import DEFAULT_CONFIG_PATH
     import json
     
-    # Create a sample configuration
-    sample_config = {
-        'dashboard': {
-            'max_cols': 2,
-            'plots': [
-                {
-                    'id': 1,
-                    'type': 'Equity Curve',
-                    'title': 'Strategy Equity',
-                    'position': {'row': 0, 'col': 0},
-                    'config': {
-                        'line_color': '#0000FF',
-                        'line_width': 2,
-                        'grid': {'x': True, 'y': True}
-                    }
-                },
-                {
-                    'id': 2,
-                    'type': 'Drawdown Chart',
-                    'title': 'Drawdown Analysis',
-                    'position': {'row': 0, 'col': 1},
-                    'config': {
-                        'line_color': '#FF0000',
-                        'line_width': 1,
-                        'grid': {'x': True, 'y': True}
-                    }
-                },
-                {
-                    'id': 3,
-                    'type': 'Monthly Returns Heatmap',
-                    'title': 'Monthly Performance',
-                    'position': {'row': 1, 'col': 0},
-                    'config': {}
-                },
-                {
-                    'id': 4,
-                    'type': 'Rolling Sharpe Ratio',
-                    'title': 'Rolling Sharpe',
-                    'position': {'row': 1, 'col': 1},
-                    'config': {
-                        'window_size': 252,
-                        'line_color': '#00AA00',
-                        'line_width': 2,
-                        'grid': {'x': True, 'y': True}
-                    }
-                }
-            ]
-        },
-        'data_sources': []
-    }
+    with open(DEFAULT_CONFIG_PATH, 'r') as f:
+        sample_config = json.load(f)
     
     # Ensure output directory exists
     os.makedirs(output_dir, exist_ok=True)
