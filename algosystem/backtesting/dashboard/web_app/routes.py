@@ -7,43 +7,119 @@ from werkzeug.utils import secure_filename
 from algosystem.backtesting.dashboard.web_app.app import app, DEFAULT_CONFIG_PATH, USER_CONFIG_PATH, uploaded_data, engine, dashboard_path
 from algosystem.backtesting.engine import Engine
 
-# Available chart types and metrics
-AVAILABLE_CHARTS = [
-    {"id": "equity_curve", "type": "LineChart", "title": "Equity Curve", "data_key": "equity", 
-     "description": "Shows the growth of portfolio value over time"},
-    {"id": "drawdown", "type": "LineChart", "title": "Drawdown Chart", "data_key": "drawdown", 
-     "description": "Shows the drawdown periods for the strategy"},
-    {"id": "monthly_returns", "type": "HeatmapTable", "title": "Monthly Returns Heatmap", "data_key": "monthly_returns", 
-     "description": "Displays monthly returns as a heatmap"},
-    {"id": "rolling_sharpe", "type": "LineChart", "title": "Rolling Sharpe Ratio", "data_key": "rolling_sharpe", 
-     "description": "Shows the rolling Sharpe ratio over time"},
-    {"id": "rolling_volatility", "type": "LineChart", "title": "Rolling Volatility", "data_key": "rolling_volatility", 
-     "description": "Shows the rolling volatility over time"},
-    {"id": "rolling_returns", "type": "LineChart", "title": "Rolling Returns", "data_key": "rolling_returns", 
-     "description": "Shows the rolling returns over time"},
-    {"id": "returns_distribution", "type": "LineChart", "title": "Returns Distribution", "data_key": "returns_distribution", 
-     "description": "Shows the distribution of returns"}
-]
 
 AVAILABLE_METRICS = [
-    {"id": "annual_return", "type": "Percentage", "title": "Annualized Return", "value_key": "annual_return", 
+    # Basic performance metrics
+    {"id": "total_return", "type": "Percentage", "title": "Total Return", "value_key": "total_return", 
+     "description": "Total return over the full period"},
+    {"id": "annual_return", "type": "Percentage", "title": "Annualized Return", "value_key": "annualized_return", 
      "description": "Annualized return of the strategy"},
-    {"id": "volatility", "type": "Percentage", "title": "Volatility", "value_key": "volatility", 
+    {"id": "volatility", "type": "Percentage", "title": "Volatility", "value_key": "annualized_volatility", 
      "description": "Annualized volatility of the strategy"},
+     
+    # Risk metrics
+    {"id": "max_drawdown", "type": "Percentage", "title": "Max Drawdown", "value_key": "max_drawdown", 
+     "description": "Maximum drawdown of the strategy"},
+    {"id": "var_95", "type": "Percentage", "title": "Value at Risk (95%)", "value_key": "var_95", 
+     "description": "95% Value at Risk"},
+    {"id": "cvar_95", "type": "Percentage", "title": "Conditional VaR (95%)", "value_key": "cvar_95", 
+     "description": "95% Conditional Value at Risk (Expected Shortfall)"},
+    {"id": "skewness", "type": "Value", "title": "Skewness", "value_key": "skewness", 
+     "description": "Skewness of returns distribution"},
+     
+    # Ratio metrics
     {"id": "sharpe_ratio", "type": "Value", "title": "Sharpe Ratio", "value_key": "sharpe_ratio", 
      "description": "Sharpe ratio of the strategy"},
     {"id": "sortino_ratio", "type": "Value", "title": "Sortino Ratio", "value_key": "sortino_ratio", 
      "description": "Sortino ratio of the strategy"},
-    {"id": "max_drawdown", "type": "Percentage", "title": "Max Drawdown", "value_key": "max_drawdown", 
-     "description": "Maximum drawdown of the strategy"},
     {"id": "calmar_ratio", "type": "Value", "title": "Calmar Ratio", "value_key": "calmar_ratio", 
      "description": "Calmar ratio of the strategy"},
-    {"id": "win_rate", "type": "Percentage", "title": "Win Rate", "value_key": "win_rate", 
-     "description": "Percentage of winning trades"},
-    {"id": "avg_win", "type": "Percentage", "title": "Average Win", "value_key": "avg_win", 
-     "description": "Average return of winning trades"},
-    {"id": "avg_loss", "type": "Percentage", "title": "Average Loss", "value_key": "avg_loss", 
-     "description": "Average return of losing trades"}
+     
+    # Trade statistics
+    {"id": "positive_days", "type": "Value", "title": "Positive Days", "value_key": "positive_days", 
+     "description": "Number of days with positive returns"},
+    {"id": "negative_days", "type": "Value", "title": "Negative Days", "value_key": "negative_days", 
+     "description": "Number of days with negative returns"},
+    {"id": "win_rate", "type": "Percentage", "title": "Win Rate", "value_key": "pct_positive_days", 
+     "description": "Percentage of days with positive returns"},
+     
+    # Monthly statistics
+    {"id": "best_month", "type": "Percentage", "title": "Best Month", "value_key": "best_month", 
+     "description": "Best monthly return"},
+    {"id": "worst_month", "type": "Percentage", "title": "Worst Month", "value_key": "worst_month", 
+     "description": "Worst monthly return"},
+    {"id": "avg_monthly_return", "type": "Percentage", "title": "Avg Monthly Return", "value_key": "avg_monthly_return", 
+     "description": "Average monthly return"},
+    {"id": "monthly_volatility", "type": "Percentage", "title": "Monthly Volatility", "value_key": "monthly_volatility", 
+     "description": "Standard deviation of monthly returns"},
+    {"id": "monthly_win_rate", "type": "Percentage", "title": "Monthly Win Rate", "value_key": "pct_positive_months", 
+     "description": "Percentage of months with positive returns"},
+     
+    # Benchmark-relative metrics (conditionally available)
+    {"id": "alpha", "type": "Percentage", "title": "Alpha", "value_key": "alpha", 
+     "description": "Alpha relative to benchmark"},
+    {"id": "beta", "type": "Value", "title": "Beta", "value_key": "beta", 
+     "description": "Beta relative to benchmark"},
+    {"id": "correlation", "type": "Value", "title": "Correlation", "value_key": "correlation", 
+     "description": "Correlation with benchmark"},
+    {"id": "tracking_error", "type": "Percentage", "title": "Tracking Error", "value_key": "tracking_error", 
+     "description": "Tracking error relative to benchmark"},
+    {"id": "information_ratio", "type": "Value", "title": "Information Ratio", "value_key": "information_ratio", 
+     "description": "Information ratio relative to benchmark"},
+    {"id": "capture_ratio_up", "type": "Percentage", "title": "Upside Capture", "value_key": "capture_ratio_up", 
+     "description": "Upside capture ratio"},
+    {"id": "capture_ratio_down", "type": "Percentage", "title": "Downside Capture", "value_key": "capture_ratio_down", 
+     "description": "Downside capture ratio"}
+]
+
+AVAILABLE_CHARTS = [
+    # Basic performance charts
+    {"id": "equity_curve", "type": "LineChart", "title": "Equity Curve", "data_key": "equity_curve", 
+     "description": "Shows the growth of portfolio value over time"},
+    {"id": "drawdown", "type": "LineChart", "title": "Drawdown Chart", "data_key": "drawdown_series", 
+     "description": "Shows the drawdown periods for the strategy"},
+    {"id": "daily_returns", "type": "LineChart", "title": "Daily Returns", "data_key": "daily_returns", 
+     "description": "Shows daily returns of the strategy"},
+    {"id": "monthly_returns", "type": "HeatmapTable", "title": "Monthly Returns Heatmap", "data_key": "monthly_returns", 
+     "description": "Displays monthly returns as a heatmap"},
+    {"id": "yearly_returns", "type": "BarChart", "title": "Yearly Returns", "data_key": "yearly_returns", 
+     "description": "Shows yearly returns as a bar chart"},
+     
+    # Rolling metrics charts
+    {"id": "rolling_sharpe", "type": "LineChart", "title": "Rolling Sharpe Ratio", "data_key": "rolling_sharpe", 
+     "description": "Shows the rolling Sharpe ratio over time"},
+    {"id": "rolling_sortino", "type": "LineChart", "title": "Rolling Sortino Ratio", "data_key": "rolling_sortino", 
+     "description": "Shows the rolling Sortino ratio over time"},
+    {"id": "rolling_volatility", "type": "LineChart", "title": "Rolling Volatility", "data_key": "rolling_volatility", 
+     "description": "Shows the rolling volatility over time"},
+    {"id": "rolling_skew", "type": "LineChart", "title": "Rolling Skewness", "data_key": "rolling_skew", 
+     "description": "Shows the rolling skewness of returns"},
+    {"id": "rolling_var", "type": "LineChart", "title": "Rolling VaR (5%)", "data_key": "rolling_var", 
+     "description": "Shows the rolling 5% Value at Risk"},
+    {"id": "rolling_drawdown_duration", "type": "LineChart", "title": "Rolling Max Drawdown Duration", "data_key": "rolling_drawdown_duration", 
+     "description": "Shows the rolling maximum drawdown duration in days"},
+     
+    # Rolling returns charts
+    {"id": "rolling_3m_returns", "type": "LineChart", "title": "Rolling 3-Month Returns", "data_key": "rolling_3m_returns", 
+     "description": "Shows rolling 3-month returns"},
+    {"id": "rolling_6m_returns", "type": "LineChart", "title": "Rolling 6-Month Returns", "data_key": "rolling_6m_returns", 
+     "description": "Shows rolling 6-month returns"},
+    {"id": "rolling_1y_returns", "type": "LineChart", "title": "Rolling 1-Year Returns", "data_key": "rolling_1y_returns", 
+     "description": "Shows rolling 1-year returns"},
+     
+    # Benchmark comparison charts (conditionally available)
+    {"id": "benchmark_comparison", "type": "LineChart", "title": "Strategy vs Benchmark", 
+     "data_key": "benchmark_comparison", 
+     "description": "Compares strategy and benchmark performance"},
+    {"id": "relative_performance", "type": "LineChart", "title": "Relative Performance", 
+     "data_key": "relative_performance", 
+     "description": "Shows performance relative to benchmark"},
+    {"id": "benchmark_drawdown", "type": "LineChart", "title": "Benchmark Drawdown", 
+     "data_key": "benchmark_drawdown_series", 
+     "description": "Shows benchmark drawdown periods"},
+    {"id": "benchmark_volatility", "type": "LineChart", "title": "Benchmark Rolling Volatility", 
+     "data_key": "benchmark_rolling_volatility", 
+     "description": "Shows benchmark rolling volatility"}
 ]
 
 def load_config(config_path=None):
