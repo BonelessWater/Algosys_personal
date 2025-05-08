@@ -1,5 +1,6 @@
 import os
 import json
+import tempfile
 import webbrowser
 import shutil
 
@@ -810,3 +811,641 @@ body {
     
     with open(os.path.join(css_dir, 'dashboard.css'), 'w') as f:
         f.write(content)
+
+
+# This is a completely new implementation of the standalone dashboard generator
+# The error you're seeing is likely because the dashboard is trying to fetch data.json
+# In a standalone page, we need to embed all data directly in the HTML
+
+def generate_standalone_dashboard(engine, output_path=None, config_path=None):
+    """
+    Generate a standalone HTML dashboard that doesn't require a web server.
+    
+    Parameters:
+    -----------
+    engine : Engine
+        Backtesting engine with results
+    output_path : str, optional
+        Path where the standalone HTML file will be saved
+    config_path : str, optional
+        Path to a custom dashboard configuration file
+        
+    Returns:
+    --------
+    output_path : str
+        Path to the generated standalone HTML file
+    """
+    import os
+    import json
+    import tempfile
+    import shutil
+    
+    if output_path is None:
+        output_path = os.path.join(os.getcwd(), "standalone_dashboard.html")
+    
+    # Prepare the dashboard data
+    from .utils.data_formatter import prepare_dashboard_data
+    
+    # Load configuration
+    if config_path is None:
+        from .utils.default_config import get_default_config
+        config = get_default_config()
+    else:
+        with open(config_path, 'r') as f:
+            config = json.load(f)
+            
+    # Prepare dashboard data
+    dashboard_data = prepare_dashboard_data(engine, config)
+    
+    # Create the standalone HTML content
+    html = """<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AlgoSystem Dashboard</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/moment.js/2.29.4/moment.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/chartjs-adapter-moment/1.0.1/chartjs-adapter-moment.min.js"></script>
+    <style>
+    /* Base styles */
+    * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+    }
+
+    body {
+        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        background-color: #f5f7fa;
+        color: #333;
+        line-height: 1.6;
+        padding: 20px;
+    }
+
+    /* Container */
+    .dashboard-container {
+        max-width: 1200px;
+        margin: 0 auto;
+        background-color: white;
+        border-radius: 10px;
+        box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+        padding: 30px;
+    }
+
+    /* Header styles */
+    .dashboard-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 20px;
+        background-color: #2c3e50;
+        color: white;
+        border-radius: 8px;
+        margin-bottom: 20px;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    }
+
+    .header-info h1 {
+        font-size: 24px;
+        margin-bottom: 5px;
+    }
+
+    .date-range {
+        font-size: 14px;
+        opacity: 0.8;
+    }
+
+    .header-summary h2 {
+        font-size: 28px;
+        font-weight: bold;
+        margin-bottom: 5px;
+    }
+
+    .header-summary .label {
+        font-size: 14px;
+        color: rgba(255, 255, 255, 0.8);
+    }
+
+    /* Metrics section */
+    .metrics-section {
+        margin-bottom: 20px;
+    }
+
+    .metrics-row {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+        gap: 20px;
+        margin-bottom: 20px;
+    }
+
+    .metric-card {
+        background-color: white;
+        border-radius: 8px;
+        padding: 20px;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+    }
+
+    .metric-card:hover {
+        transform: translateY(-3px);
+        box-shadow: 0 6px 8px rgba(0, 0, 0, 0.15);
+    }
+
+    .metric-title {
+        font-size: 14px;
+        color: #7f8c8d;
+        margin-bottom: 10px;
+    }
+
+    .metric-value {
+        font-size: 24px;
+        font-weight: bold;
+    }
+
+    /* Charts section */
+    .charts-section {
+        margin-bottom: 20px;
+    }
+
+    .charts-row {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 20px;
+        margin-bottom: 20px;
+    }
+
+    .chart-card {
+        background-color: white;
+        border-radius: 8px;
+        padding: 20px;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+    }
+
+    .chart-card:hover {
+        transform: translateY(-3px);
+        box-shadow: 0 6px 8px rgba(0, 0, 0, 0.15);
+    }
+
+    .chart-header {
+        margin-bottom: 15px;
+    }
+
+    .chart-title {
+        font-size: 18px;
+        color: #333;
+    }
+
+    .chart-container {
+        height: 300px;
+        width: 100%;
+        position: relative;
+    }
+
+    /* Heatmap table */
+    .heatmap-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 14px;
+    }
+
+    .heatmap-table th,
+    .heatmap-table td {
+        padding: 8px;
+        text-align: center;
+        border: 1px solid #ddd;
+    }
+
+    .heatmap-table th {
+        background-color: #f2f2f2;
+        font-weight: bold;
+    }
+
+    /* Value formatting */
+    .positive {
+        color: #2ecc71;
+    }
+
+    .negative {
+        color: #e74c3c;
+    }
+
+    .positive-return {
+        color: #2ecc71;
+    }
+
+    .negative-return {
+        color: #e74c3c;
+    }
+
+    /* Error messages */
+    .error-message {
+        color: #e74c3c;
+        text-align: center;
+        padding: 20px;
+        font-weight: bold;
+    }
+
+    /* Export button */
+    .export-actions {
+        text-align: right;
+        margin-bottom: 20px;
+    }
+
+    .export-button {
+        background-color: #3498db;
+        color: white;
+        border: none;
+        padding: 8px 15px;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 14px;
+    }
+
+    .export-button:hover {
+        background-color: #2980b9;
+    }
+
+    @media print {
+        body {
+            padding: 0;
+            background-color: white;
+        }
+        
+        .dashboard-container {
+            box-shadow: none;
+            max-width: 100%;
+            padding: 0;
+        }
+        
+        .export-actions {
+            display: none;
+        }
+    }
+
+    /* Responsive design */
+    @media (max-width: 768px) {
+        .dashboard-header {
+            flex-direction: column;
+            align-items: flex-start;
+        }
+        
+        .header-summary {
+            margin-top: 15px;
+        }
+        
+        .charts-row {
+            grid-template-columns: 1fr;
+        }
+        
+        .metrics-row {
+            grid-template-columns: 1fr;
+        }
+    }
+    </style>
+</head>
+<body>
+    <div class="dashboard-container">
+        <div class="export-actions">
+            <button class="export-button" onclick="window.print()">Print Dashboard</button>
+        </div>
+        
+        <!-- Header -->
+        <header class="dashboard-header">
+            <div class="header-info">
+                <h1 id="dashboard-title"></h1>
+                <div class="date-range" id="date-range"></div>
+            </div>
+            <div class="header-summary">
+                <h2 id="total-return"></h2>
+                <p class="label">Total Return</p>
+            </div>
+        </header>
+        
+        <!-- Metrics Section -->
+        <section class="metrics-section">
+            <div class="metrics-row" id="metrics-container">
+                <!-- Metrics will be added here -->
+            </div>
+        </section>
+        
+        <!-- Charts Section -->
+        <section class="charts-section" id="charts-section">
+            <!-- Charts will be added here -->
+        </section>
+    </div>
+    
+    <script>
+    // Utility functions
+    function formatAsPercentage(value) {
+        return (value * 100).toFixed(2) + '%';
+    }
+    
+    function formatValue(value) {
+        return value.toFixed(2);
+    }
+    
+    function formatAsCurrency(value) {
+        return '$' + value.toFixed(2);
+    }
+    
+    // Function to create metrics
+    function createMetrics(metrics) {
+        const container = document.getElementById('metrics-container');
+        container.innerHTML = '';
+        
+        for (const metricId in metrics) {
+            const metric = metrics[metricId];
+            
+            const card = document.createElement('div');
+            card.className = 'metric-card';
+            
+            const title = document.createElement('div');
+            title.className = 'metric-title';
+            title.textContent = metric.title;
+            
+            const value = document.createElement('div');
+            value.className = 'metric-value';
+            
+            let formattedValue;
+            let className;
+            
+            if (metric.type === 'Percentage') {
+                formattedValue = formatAsPercentage(metric.value);
+                className = metric.value >= 0 ? 'positive' : 'negative';
+            } else if (metric.type === 'Value') {
+                formattedValue = formatValue(metric.value);
+                className = metric.value >= 0 ? 'positive' : 'negative';
+            } else if (metric.type === 'Currency') {
+                formattedValue = formatAsCurrency(metric.value);
+                className = metric.value >= 0 ? 'positive' : 'negative';
+            } else {
+                formattedValue = metric.value;
+                className = '';
+            }
+            
+            value.innerHTML = `<span class="${className}">${formattedValue}</span>`;
+            
+            card.appendChild(title);
+            card.appendChild(value);
+            
+            container.appendChild(card);
+        }
+    }
+    
+    // Function to create a line chart
+    function createLineChart(chartId, chartData, chartOptions) {
+        const container = document.createElement('div');
+        container.className = 'chart-card';
+        
+        const header = document.createElement('div');
+        header.className = 'chart-header';
+        
+        const title = document.createElement('h3');
+        title.className = 'chart-title';
+        title.textContent = chartData.title;
+        
+        header.appendChild(title);
+        container.appendChild(header);
+        
+        const chartContainer = document.createElement('div');
+        chartContainer.className = 'chart-container';
+        container.appendChild(chartContainer);
+        
+        const canvas = document.createElement('canvas');
+        chartContainer.appendChild(canvas);
+        
+        // Create the chart
+        new Chart(canvas, {
+            type: 'line',
+            data: chartData.data,
+            options: chartOptions || {}
+        });
+        
+        return container;
+    }
+    
+    // Function to create a heatmap table
+    function createHeatmapTable(chartId, chartData) {
+        const container = document.createElement('div');
+        container.className = 'chart-card';
+        
+        const header = document.createElement('div');
+        header.className = 'chart-header';
+        
+        const title = document.createElement('h3');
+        title.className = 'chart-title';
+        title.textContent = chartData.title;
+        
+        header.appendChild(title);
+        container.appendChild(header);
+        
+        const chartContainer = document.createElement('div');
+        chartContainer.className = 'chart-container';
+        container.appendChild(chartContainer);
+        
+        // Create table
+        const table = document.createElement('table');
+        table.className = 'heatmap-table';
+        
+        // Create header row
+        const headerRow = document.createElement('tr');
+        
+        // Add empty corner cell
+        const cornerCell = document.createElement('th');
+        headerRow.appendChild(cornerCell);
+        
+        // Add month headers
+        chartData.data.months.forEach(month => {
+            const cell = document.createElement('th');
+            cell.textContent = month;
+            headerRow.appendChild(cell);
+        });
+        
+        table.appendChild(headerRow);
+        
+        // Create data rows
+        chartData.data.years.forEach(year => {
+            const row = document.createElement('tr');
+            
+            // Add year header
+            const yearCell = document.createElement('th');
+            yearCell.textContent = year;
+            row.appendChild(yearCell);
+            
+            // Add data cells
+            for (let month = 1; month <= 12; month++) {
+                const cell = document.createElement('td');
+                const key = `${year}-${month}`;
+                
+                if (key in chartData.data.data) {
+                    const value = chartData.data.data[key];
+                    
+                    // Format value
+                    cell.textContent = formatAsPercentage(value);
+                    
+                    // Apply color scale
+                    if (value > 0.03) {
+                        cell.style.backgroundColor = 'rgba(46, 204, 113, 0.8)';
+                        cell.style.color = 'white';
+                    } else if (value > 0.01) {
+                        cell.style.backgroundColor = 'rgba(46, 204, 113, 0.5)';
+                    } else if (value > 0) {
+                        cell.style.backgroundColor = 'rgba(46, 204, 113, 0.2)';
+                    } else if (value > -0.01) {
+                        cell.style.backgroundColor = 'rgba(231, 76, 60, 0.2)';
+                    } else if (value > -0.03) {
+                        cell.style.backgroundColor = 'rgba(231, 76, 60, 0.5)';
+                    } else {
+                        cell.style.backgroundColor = 'rgba(231, 76, 60, 0.8)';
+                        cell.style.color = 'white';
+                    }
+                }
+                
+                row.appendChild(cell);
+            }
+            
+            table.appendChild(row);
+        });
+        
+        chartContainer.appendChild(table);
+        
+        return container;
+    }
+    
+    // Function to initialize dashboard
+    function initDashboard(data) {
+        // Update header
+        document.getElementById('dashboard-title').textContent = data.metadata.title;
+        document.getElementById('date-range').textContent = `Backtest Period: ${data.metadata.start_date} to ${data.metadata.end_date}`;
+        
+        // Update total return
+        const totalReturn = data.metadata.total_return;
+        const totalReturnElement = document.getElementById('total-return');
+        totalReturnElement.textContent = `${totalReturn >= 0 ? '+' : ''}${formatAsPercentage(totalReturn)}`;
+        totalReturnElement.className = totalReturn >= 0 ? 'positive-return' : 'negative-return';
+        
+        // Create metrics
+        createMetrics(data.metrics);
+        
+        // Create charts
+        const chartsSection = document.getElementById('charts-section');
+        
+        // Group charts by row
+        const chartsByRow = {};
+        
+        for (const chartId in data.charts) {
+            const chart = data.charts[chartId];
+            const row = chart.position.row;
+            
+            if (!chartsByRow[row]) {
+                chartsByRow[row] = [];
+            }
+            
+            chartsByRow[row].push(chart);
+        }
+        
+        // Create chart rows
+        Object.keys(chartsByRow).sort().forEach(row => {
+            const charts = chartsByRow[row];
+            
+            const chartsRow = document.createElement('div');
+            chartsRow.className = 'charts-row';
+            
+            // Add charts to row
+            charts.sort((a, b) => a.position.col - b.position.col).forEach(chart => {
+                if (chart.type === 'LineChart') {
+                    // Create line chart options
+                    const options = {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: {
+                                display: true,
+                                position: 'top',
+                            },
+                            tooltip: {
+                                mode: 'index',
+                                intersect: false
+                            }
+                        },
+                        scales: {
+                            x: {
+                                type: 'time',
+                                time: {
+                                    unit: 'month',
+                                    displayFormats: {
+                                        month: 'MMM YYYY'
+                                    }
+                                },
+                                title: {
+                                    display: true,
+                                    text: 'Date'
+                                }
+                            },
+                            y: {
+                                title: {
+                                    display: true,
+                                    text: chart.config?.y_axis_label || 'Value'
+                                }
+                            }
+                        }
+                    };
+                    
+                    // Add percentage formatting if needed
+                    if (chart.config?.percentage_format) {
+                        options.plugins.tooltip.callbacks = {
+                            label: function(context) {
+                                let label = context.dataset.label || '';
+                                if (label) {
+                                    label += ': ';
+                                }
+                                if (context.parsed.y !== null) {
+                                    label += formatAsPercentage(context.parsed.y);
+                                }
+                                return label;
+                            }
+                        };
+                        
+                        options.scales.y.ticks = {
+                            callback: function(value) {
+                                return formatAsPercentage(value);
+                            }
+                        };
+                    }
+                    
+                    chartsRow.appendChild(createLineChart(chart.id, chart, options));
+                } else if (chart.type === 'HeatmapTable') {
+                    chartsRow.appendChild(createHeatmapTable(chart.id, chart));
+                }
+            });
+            
+            chartsSection.appendChild(chartsRow);
+        });
+    }
+    
+    // Initialize dashboard when document is ready
+    document.addEventListener('DOMContentLoaded', function() {
+        // Dashboard data
+        const dashboardData = DASHBOARD_DATA_PLACEHOLDER;
+        
+        // Initialize dashboard
+        initDashboard(dashboardData);
+    });
+    </script>
+</body>
+</html>
+"""
+
+    # Replace placeholder with actual data
+    dashboard_data_json = json.dumps(dashboard_data)
+    html = html.replace('const dashboardData = DASHBOARD_DATA_PLACEHOLDER;', 
+                        f'const dashboardData = {dashboard_data_json};')
+    
+    # Write to output file
+    with open(output_path, 'w') as f:
+        f.write(html)
+    
+    return output_path
+

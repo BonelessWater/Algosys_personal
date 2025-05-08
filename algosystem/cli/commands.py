@@ -142,5 +142,64 @@ def create_config(output_dir):
     
     click.echo(f"Sample configuration saved to: {output_path}")
 
+@cli.command()
+@click.argument('input_file', type=click.Path(exists=True))
+@click.option('--output-file', '-o', type=click.Path(), default="./standalone_dashboard.html",
+              help='Path to save the standalone dashboard HTML file (default: ./standalone_dashboard.html)')
+@click.option('--benchmark', '-b', type=click.Path(exists=True),
+              help='Path to a CSV file with benchmark data')
+@click.option('--open-browser', is_flag=True, default=False,
+              help='Open the dashboard in a browser after rendering')
+def standalone(input_file, output_file, benchmark, open_browser):
+    """
+    Create a standalone HTML dashboard from a CSV file that can be viewed without a web server.
+    
+    INPUT_FILE: Path to a CSV file with strategy data
+    """
+    import webbrowser
+    from algosystem.backtesting.engine import Engine
+    
+    try:
+        # Load the CSV data
+        click.echo(f"Loading data from {input_file}...")
+        data = pd.read_csv(input_file, index_col=0, parse_dates=True)
+        click.echo(f"Loaded data with shape: {data.shape}")
+        
+        # Load benchmark data if provided
+        benchmark_data = None
+        if benchmark:
+            click.echo(f"Loading benchmark data from {benchmark}...")
+            benchmark_data = pd.read_csv(benchmark, index_col=0, parse_dates=True)
+            if isinstance(benchmark_data, pd.DataFrame) and benchmark_data.shape[1] > 1:
+                benchmark_data = benchmark_data.iloc[:, 0]  # Use first column
+            click.echo(f"Loaded benchmark data with {len(benchmark_data)} rows")
+        
+        # Create a backtest engine to process the data
+        click.echo("Running backtest...")
+        if isinstance(data, pd.DataFrame) and data.shape[1] > 1:
+            # Use the first column as price data
+            price_data = data.iloc[:, 0]
+        else:
+            price_data = data
+        
+        # Initialize and run the engine
+        engine = Engine(data=price_data, benchmark=benchmark_data)
+        results = engine.run()
+        click.echo("Backtest completed successfully")
+        
+        # Generate standalone dashboard
+        click.echo("Generating standalone dashboard...")
+        dashboard_path = engine.generate_standalone_dashboard(output_path=output_file)
+        
+        click.echo(f"Standalone dashboard generated successfully at: {dashboard_path}")
+        
+        # Open in browser if requested
+        if open_browser:
+            webbrowser.open('file://' + os.path.abspath(dashboard_path))
+        
+    except Exception as e:
+        click.echo(f"Error: {str(e)}", err=True)
+        sys.exit(1)
+
 if __name__ == '__main__':
     cli()
