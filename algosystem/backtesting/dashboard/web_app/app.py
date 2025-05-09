@@ -5,6 +5,11 @@ import pandas as pd
 import sys
 import tempfile
 from pathlib import Path
+import logging
+
+# Set up basic logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
 # Add the parent directory to the path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))))
@@ -37,13 +42,26 @@ USER_CONFIG_PATH = os.path.join(USER_CONFIG_DIR, "dashboard_config.json")
 CUSTOM_CONFIG_PATH = os.environ.get('ALGO_DASHBOARD_CONFIG')
 SAVE_CONFIG_PATH = os.environ.get('ALGO_DASHBOARD_SAVE_CONFIG')
 
-# Determine which configuration to use
-CONFIG_PATH = CUSTOM_CONFIG_PATH if CUSTOM_CONFIG_PATH else USER_CONFIG_PATH
+# Determine which configuration to use for both loading and saving
+if SAVE_CONFIG_PATH:
+    # If --save-config was specified, use it for both loading and saving
+    CONFIG_PATH = os.path.abspath(SAVE_CONFIG_PATH)
+    logger.info(f"Using custom configuration path for loading and saving: {CONFIG_PATH}")
+elif CUSTOM_CONFIG_PATH:
+    # If --config was specified, use it for loading 
+    CONFIG_PATH = os.path.abspath(CUSTOM_CONFIG_PATH)
+    logger.info(f"Using custom configuration path for loading: {CONFIG_PATH}")
+else:
+    # Fall back to the user config
+    CONFIG_PATH = USER_CONFIG_PATH
+    logger.info(f"Using default user configuration path: {CONFIG_PATH}")
 
 # Ensure the directories exist
 os.makedirs(USER_CONFIG_DIR, exist_ok=True)
-if SAVE_CONFIG_PATH:
-    os.makedirs(os.path.dirname(os.path.abspath(SAVE_CONFIG_PATH)), exist_ok=True)
+if CONFIG_PATH:
+    config_dir = os.path.dirname(os.path.abspath(CONFIG_PATH))
+    os.makedirs(config_dir, exist_ok=True)
+    logger.info(f"Ensured directory exists: {config_dir}")
 
 # Global variables
 uploaded_data = None
@@ -68,19 +86,45 @@ def load_config(config_path=None):
     if config_path is None:
         config_path = CONFIG_PATH
     
+    logger.info(f"Attempting to load configuration from: {config_path}")
+    
     # If config_path exists, load it
     if os.path.exists(config_path):
         try:
             with open(config_path, 'r') as f:
-                return json.load(f)
-        except json.JSONDecodeError:
-            print(f"Warning: Failed to parse config at {config_path}. Using default config.")
+                config_data = json.load(f)
+                logger.info(f"Successfully loaded configuration from: {config_path}")
+                return config_data
+        except json.JSONDecodeError as e:
+            logger.warning(f"Failed to parse config at {config_path}: {str(e)}. Using default config.")
+        except Exception as e:
+            logger.warning(f"Error reading config at {config_path}: {str(e)}. Using default config.")
+    else:
+        logger.info(f"Configuration file {config_path} does not exist yet. Will be created with default settings.")
     
     # Fall back to default configuration if needed
-    with open(DEFAULT_CONFIG_PATH, 'r') as f:
-        default_config = json.load(f)
-    
-    return default_config
+    try:
+        with open(DEFAULT_CONFIG_PATH, 'r') as f:
+            default_config = json.load(f)
+            logger.info(f"Loaded default configuration from: {DEFAULT_CONFIG_PATH}")
+        
+        # If the custom config doesn't exist yet, save the default config there
+        if config_path != DEFAULT_CONFIG_PATH and not os.path.exists(config_path):
+            save_config(default_config, config_path)
+            logger.info(f"Created new configuration file at: {config_path}")
+        
+        return default_config
+    except Exception as e:
+        logger.error(f"Error loading default configuration: {str(e)}")
+        # Return a minimal default configuration to prevent further errors
+        return {
+            "metrics": [],
+            "charts": [],
+            "layout": {
+                "max_cols": 2,
+                "title": "AlgoSystem Trading Dashboard"
+            }
+        }
 
 def save_config(config, config_path=None):
     """
@@ -100,34 +144,162 @@ def save_config(config, config_path=None):
     """
     # Determine where to save the configuration
     if config_path is None:
-        # If a save path was specified via environment variable, use that
-        if SAVE_CONFIG_PATH:
-            config_path = SAVE_CONFIG_PATH
-        else:
-            # Otherwise use the user config path
-            config_path = USER_CONFIG_PATH
+        config_path = CONFIG_PATH
+    
+    logger.info(f"Attempting to save configuration to: {config_path}")
+    
+    # Validate configuration before saving
+    if not isinstance(config, dict) or not config:
+        logger.error(f"Invalid configuration data. Not saving.")
+        return False
+    
+    # Ensure the configuration has the required sections
+    if 'metrics' not in config or 'charts' not in config or 'layout' not in config:
+        logger.warning("Configuration missing required sections. Adding missing sections.")
+        if 'metrics' not in config:
+            config['metrics'] = []
+        if 'charts' not in config:
+            config['charts'] = []
+        if 'layout' not in config:
+            config['layout'] = {
+                "max_cols": 2,
+                "title": "AlgoSystem Trading Dashboard"
+            }
     
     # Ensure the directory exists
-    os.makedirs(os.path.dirname(os.path.abspath(config_path)), exist_ok=True)
+    config_dir = os.path.dirname(os.path.abspath(config_path))
+    os.makedirs(config_dir, exist_ok=True)
     
     try:
         with open(config_path, 'w') as f:
             json.dump(config, f, indent=4)
+        logger.info(f"Configuration successfully saved to: {config_path}")
+        
+        # Verify the file was written correctly
+        if os.path.exists(config_path) and os.path.getsize(config_path) > 0:
+            logger.info(f"Verified config file exists and is not empty: {config_path} ({os.path.getsize(config_path)} bytes)")
+        else:
+            logger.warning(f"Config file appears to be empty after saving: {config_path}")
+            
         return True
     except Exception as e:
-        print(f"Error saving configuration: {str(e)}")
+        logger.error(f"Error saving configuration to {config_path}: {str(e)}")
         return False
+
+# Add a route specifically for debugging the configuration
+@app.route('/api/debug/config', methods=['GET'])
+def debug_config():
+    """Return detailed information about the configuration for debugging."""
+    config_info = {
+        'config_paths': {
+            'DEFAULT_CONFIG_PATH': DEFAULT_CONFIG_PATH,
+            'USER_CONFIG_PATH': USER_CONFIG_PATH,
+            'CUSTOM_CONFIG_PATH': CUSTOM_CONFIG_PATH,
+            'SAVE_CONFIG_PATH': SAVE_CONFIG_PATH,
+            'ACTIVE_CONFIG_PATH': CONFIG_PATH
+        },
+        'file_exists': {
+            'DEFAULT_CONFIG_PATH': os.path.exists(DEFAULT_CONFIG_PATH),
+            'USER_CONFIG_PATH': os.path.exists(USER_CONFIG_PATH),
+            'CUSTOM_CONFIG_PATH': CUSTOM_CONFIG_PATH and os.path.exists(CUSTOM_CONFIG_PATH),
+            'SAVE_CONFIG_PATH': SAVE_CONFIG_PATH and os.path.exists(SAVE_CONFIG_PATH),
+            'ACTIVE_CONFIG_PATH': os.path.exists(CONFIG_PATH)
+        },
+        'file_sizes': {
+            'DEFAULT_CONFIG_PATH': os.path.getsize(DEFAULT_CONFIG_PATH) if os.path.exists(DEFAULT_CONFIG_PATH) else None,
+            'USER_CONFIG_PATH': os.path.getsize(USER_CONFIG_PATH) if os.path.exists(USER_CONFIG_PATH) else None,
+            'CUSTOM_CONFIG_PATH': os.path.getsize(CUSTOM_CONFIG_PATH) if CUSTOM_CONFIG_PATH and os.path.exists(CUSTOM_CONFIG_PATH) else None,
+            'SAVE_CONFIG_PATH': os.path.getsize(SAVE_CONFIG_PATH) if SAVE_CONFIG_PATH and os.path.exists(SAVE_CONFIG_PATH) else None,
+            'ACTIVE_CONFIG_PATH': os.path.getsize(CONFIG_PATH) if os.path.exists(CONFIG_PATH) else None
+        },
+        'current_config': load_config()
+    }
+    return jsonify(config_info)
+
+@app.route('/api/upload-csv', methods=['POST'])
+def upload_csv():
+    """Upload and process a CSV file."""
+    global uploaded_data, engine, dashboard_path
+    
+    if 'file' not in request.files:
+        return jsonify({
+            'status': 'error',
+            'message': 'No file part in the request'
+        })
+    
+    file = request.files['file']
+    
+    if file.filename == '':
+        return jsonify({
+            'status': 'error',
+            'message': 'No file selected'
+        })
+    
+    if file and file.filename.endswith('.csv'):
+        # Save the file temporarily
+        filepath = os.path.join(app.config['UPLOAD_FOLDER'], file.filename)
+        file.save(filepath)
+        
+        try:
+            # Process the CSV file
+            data = pd.read_csv(filepath, index_col=0, parse_dates=True)
+            
+            # Create a backtest engine
+            engine = Engine(data=data)
+            engine.run()
+            
+            # Generate dashboard
+            config = load_config()
+            dashboard_path = generate_dashboard(
+                engine=engine,
+                output_dir=app.config['UPLOAD_FOLDER'],
+                open_browser=False,
+                config_path=None  # Use the config we loaded
+            )
+            
+            # Store the data for later use
+            uploaded_data = data
+            
+            return jsonify({
+                'status': 'success',
+                'message': f'File {file.filename} uploaded and processed successfully.'
+            })
+        except Exception as e:
+            error_message = str(e)
+            logger.error(f"Error processing CSV: {error_message}")
+            return jsonify({
+                'status': 'error',
+                'message': f'Error processing file: {error_message}'
+            })
+    else:
+        return jsonify({
+            'status': 'error',
+            'message': 'Invalid file format. Please upload a CSV file.'
+        })
 
 def start_dashboard_editor(host='127.0.0.1', port=5000, debug=False):
     """Start the dashboard editor web server."""
     # Import routes here to avoid circular imports
     from algosystem.backtesting.dashboard.web_app.routes import register_routes
     
+    # Print the configuration path being used
+    if os.path.exists(CONFIG_PATH):
+        logger.info(f"Using existing configuration from: {CONFIG_PATH}")
+    else:
+        logger.info(f"Will create new configuration at: {CONFIG_PATH}")
+    
     # Register all routes
-    register_routes(app, load_config, save_config, 
-                   DEFAULT_CONFIG_PATH, CONFIG_PATH, SAVE_CONFIG_PATH)
+    global_vars = register_routes(app, load_config, save_config, 
+                                 DEFAULT_CONFIG_PATH, CONFIG_PATH, CONFIG_PATH)
+    
+    # Store global variables
+    global uploaded_data, engine, dashboard_path
+    uploaded_data = global_vars.get('uploaded_data')
+    engine = global_vars.get('engine')
+    dashboard_path = global_vars.get('dashboard_path')
     
     # Run the Flask app
+    logger.info(f"Starting dashboard editor on http://{host}:{port}/")
     app.run(host=host, port=port, debug=debug)
 
 if __name__ == '__main__':

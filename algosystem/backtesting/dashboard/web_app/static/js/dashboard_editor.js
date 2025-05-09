@@ -485,24 +485,140 @@ config.charts.push(chart);
 currentConfig = config;
 }
 
-// Function to save the configuration
+// Function to save the configuration - updated to ensure proper saving
 function saveConfiguration() {
-// Update the configuration first
-updateConfiguration();
+    // Update the configuration first
+    updateConfiguration();
 
-// Send to the server
-$.ajax({
-url: '/api/config',
-type: 'POST',
-data: JSON.stringify(currentConfig),
-contentType: 'application/json',
-success: function(response) {
-alert('Configuration saved successfully!');
-},
-error: function(xhr, status, error) {
-alert('Error saving configuration: ' + error);
+    // Display a saving indicator
+    const saveBtn = $('#save-config');
+    const originalText = saveBtn.text();
+    saveBtn.text('Saving...');
+    saveBtn.prop('disabled', true);
+
+    // Send to the server with proper content type and stringify
+    $.ajax({
+        url: '/api/config',
+        type: 'POST',
+        data: JSON.stringify(currentConfig),
+        contentType: 'application/json',
+        dataType: 'json',
+        success: function(response) {
+            saveBtn.text(originalText);
+            saveBtn.prop('disabled', false);
+            
+            if (response.status === 'success') {
+                // Show success message
+                alert('Configuration saved successfully!');
+                console.log('Configuration saved to:', response.path);
+            } else {
+                // Show error
+                alert('Error saving configuration: ' + response.message);
+                console.error('Save error:', response.message);
+            }
+        },
+        error: function(xhr, status, error) {
+            saveBtn.text(originalText);
+            saveBtn.prop('disabled', false);
+            
+            // Show more detailed error
+            let errorMsg = 'Error saving configuration';
+            if (xhr.responseJSON && xhr.responseJSON.message) {
+                errorMsg += ': ' + xhr.responseJSON.message;
+            } else {
+                errorMsg += ': ' + error;
+            }
+            alert(errorMsg);
+            console.error('Save error:', xhr, status, error);
+        }
+    });
 }
-});
+
+// Function to update the configuration based on the current layout - enhanced validation
+function updateConfiguration() {
+    // Build a new configuration object
+    const config = {
+        metrics: [],
+        charts: [],
+        layout: {
+            max_cols: 2,
+            title: "AlgoSystem Trading Dashboard"
+        }
+    };
+
+    // Collect metrics
+    $('.metrics-row').each(function() {
+        const rowIndex = parseInt($(this).attr('data-row'));
+
+        $(this).children('.dashboard-metric').each(function() {
+            const colIndex = parseInt($(this).attr('data-col'));
+
+            const metric = {
+                id: $(this).attr('data-id'),
+                type: $(this).attr('data-type'),
+                title: $(this).attr('data-title'),
+                value_key: $(this).attr('data-value-key'),
+                position: {
+                    row: rowIndex,
+                    col: colIndex
+                }
+            };
+
+            config.metrics.push(metric);
+        });
+    });
+
+    // Collect charts
+    $('.charts-row').each(function() {
+        const rowIndex = parseInt($(this).attr('data-row'));
+
+        $(this).children('.dashboard-chart').each(function() {
+            const colIndex = parseInt($(this).attr('data-col'));
+
+            const chart = {
+                id: $(this).attr('data-id'),
+                type: $(this).attr('data-type'),
+                title: $(this).attr('data-title'),
+                data_key: $(this).attr('data-data-key'),
+                position: {
+                    row: rowIndex,
+                    col: colIndex
+                },
+                config: {}
+            };
+
+            // Parse config if present
+            const configStr = $(this).attr('data-config');
+            if (configStr) {
+                try {
+                    chart.config = JSON.parse(configStr);
+                } catch (e) {
+                    console.error('Error parsing chart config:', e);
+                    chart.config = {}; // Use empty config on error
+                }
+            }
+
+            config.charts.push(chart);
+        });
+    });
+
+    // Validate the config before updating
+    if (!config.metrics) config.metrics = [];
+    if (!config.charts) config.charts = [];
+    if (!config.layout) {
+        config.layout = {
+            max_cols: 2,
+            title: "AlgoSystem Trading Dashboard"
+        };
+    }
+
+    // Update global configuration
+    currentConfig = config;
+    
+    // Log the configuration to help with debugging
+    console.log('Updated configuration:', JSON.parse(JSON.stringify(currentConfig)));
+    
+    return config;
 }
 
 // Function to reset to the default configuration
