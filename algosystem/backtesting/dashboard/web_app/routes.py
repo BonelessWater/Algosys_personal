@@ -62,30 +62,56 @@ def register_routes(app, load_config_func, save_config_func,
     @app.route('/api/config', methods=['POST'])
     def update_config():
         """Update the configuration."""
-        config_data = request.get_json()
+        try:
+            # Get the JSON data from the request
+            config_data = request.get_json()
+            
+            if not config_data:
+                logger.error("Received empty or invalid configuration data")
+                return jsonify({"status": "error", "message": "Empty or invalid configuration data"}), 400
+            
+            # Log the configuration size
+            metrics_count = len(config_data.get('metrics', []))
+            charts_count = len(config_data.get('charts', []))
+            logger.info(f"Received configuration update with {metrics_count} metrics and {charts_count} charts")
+            print(f"Received configuration update with {metrics_count} metrics and {charts_count} charts")
+            
+            # Validate minimal configuration structure
+            if not isinstance(config_data, dict) or 'metrics' not in config_data or 'charts' not in config_data or 'layout' not in config_data:
+                logger.warning("Configuration missing required sections")
+                return jsonify({"status": "error", "message": "Configuration missing required sections (metrics, charts, or layout)"}), 400
+            
+            # Determine save path
+            save_path = save_config_path if save_config_path else config_path
+            
+            # Write the configuration to a temporary file first (for debug purposes)
+            debug_path = os.path.join(os.path.dirname(save_path), "debug_config.json")
+            try:
+                with open(debug_path, 'w') as f:
+                    json.dump(config_data, f, indent=4)
+                print(f"Debug configuration saved to: {debug_path}")
+            except Exception as debug_error:
+                print(f"Could not save debug config: {str(debug_error)}")
+            
+            # Save the configuration
+            from algosystem.backtesting.dashboard.web_app.app import save_config
+            success = save_config(config_data, save_path)
+            
+            if success:
+                logger.info(f"Configuration successfully saved to {save_path}")
+                return jsonify({
+                    "status": "success", 
+                    "message": "Configuration saved successfully", 
+                    "path": save_path
+                })
+            else:
+                logger.error(f"Failed to save configuration to {save_path}")
+                return jsonify({"status": "error", "message": "Failed to save configuration"}), 500
         
-        if not config_data:
-            logger.error("Received empty or invalid configuration data")
-            return jsonify({"status": "error", "message": "Empty or invalid configuration data"}), 400
+        except Exception as e:
+            logger.exception(f"Error updating configuration: {str(e)}")
+            return jsonify({"status": "error", "message": f"Error updating configuration: {str(e)}"}), 500
         
-        # Log the configuration content (without sensitive data)
-        logger.info(f"Received configuration update with {len(config_data.get('metrics', []))} metrics and {len(config_data.get('charts', []))} charts")
-        
-        # Validate minimal configuration structure
-        if not isinstance(config_data, dict) or 'metrics' not in config_data or 'charts' not in config_data or 'layout' not in config_data:
-            logger.warning("Configuration missing required sections")
-            return jsonify({"status": "error", "message": "Configuration missing required sections (metrics, charts, or layout)"}), 400
-        
-        # Save configuration
-        success = save_config_func(config_data, save_config_path)
-        
-        if success:
-            logger.info(f"Configuration successfully saved to {save_config_path}")
-            return jsonify({"status": "success", "message": "Configuration saved successfully", "path": save_config_path})
-        else:
-            logger.error(f"Failed to save configuration to {save_config_path}")
-            return jsonify({"status": "error", "message": "Failed to save configuration"}), 500
-
     @app.route('/api/config/save-location', methods=['GET'])
     def get_config_save_location():
         """Get the location where the configuration will be saved."""

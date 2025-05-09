@@ -1,10 +1,9 @@
 from flask import Flask, render_template, request, jsonify, redirect, url_for
 import os
 import json
-import pandas as pd
 import sys
 import tempfile
-from pathlib import Path
+import traceback
 import logging
 
 # Set up basic logging
@@ -126,9 +125,10 @@ def load_config(config_path=None):
             }
         }
 
+
 def save_config(config, config_path=None):
     """
-    Save configuration to the specified path.
+    Enhanced save_config function with robust error handling and debugging.
     
     Parameters:
     -----------
@@ -142,50 +142,71 @@ def save_config(config, config_path=None):
     bool
         True if the configuration was saved successfully, False otherwise
     """
-    # Determine where to save the configuration
+    logger = logging.getLogger(__name__)
+    
+    # Use the provided config_path or fall back to default
     if config_path is None:
-        config_path = CONFIG_PATH
+        config_path = os.environ.get('ALGO_DASHBOARD_SAVE_CONFIG', 
+                      os.path.join(os.path.expanduser("~"), ".algosystem", "dashboard_config.json"))
     
-    logger.info(f"Attempting to save configuration to: {config_path}")
+    logger.info(f"Saving configuration to: {config_path}")
+    print(f"Saving configuration to: {config_path}")  # Extra console output for debugging
     
-    # Validate configuration before saving
-    if not isinstance(config, dict) or not config:
-        logger.error(f"Invalid configuration data. Not saving.")
+    # Validate configuration content
+    if not isinstance(config, dict):
+        logger.error(f"Invalid configuration data type: {type(config).__name__}")
         return False
     
     # Ensure the configuration has the required sections
-    if 'metrics' not in config or 'charts' not in config or 'layout' not in config:
-        logger.warning("Configuration missing required sections. Adding missing sections.")
-        if 'metrics' not in config:
-            config['metrics'] = []
-        if 'charts' not in config:
-            config['charts'] = []
-        if 'layout' not in config:
-            config['layout'] = {
-                "max_cols": 2,
-                "title": "AlgoSystem Trading Dashboard"
-            }
+    if 'metrics' not in config:
+        config['metrics'] = []
+    if 'charts' not in config:
+        config['charts'] = []
+    if 'layout' not in config:
+        config['layout'] = {"max_cols": 2, "title": "AlgoSystem Trading Dashboard"}
     
-    # Ensure the directory exists
+    # Create directory if it doesn't exist
     config_dir = os.path.dirname(os.path.abspath(config_path))
     os.makedirs(config_dir, exist_ok=True)
     
     try:
-        with open(config_path, 'w') as f:
-            json.dump(config, f, indent=4)
-        logger.info(f"Configuration successfully saved to: {config_path}")
+        # Print some diagnostic info
+        print(f"Config to save: {json.dumps(config, indent=2)[:200]}...")
         
-        # Verify the file was written correctly
-        if os.path.exists(config_path) and os.path.getsize(config_path) > 0:
-            logger.info(f"Verified config file exists and is not empty: {config_path} ({os.path.getsize(config_path)} bytes)")
-        else:
-            logger.warning(f"Config file appears to be empty after saving: {config_path}")
-            
+        # First write to a temporary file
+        temp_file = f"{config_path}.tmp"
+        with open(temp_file, 'w') as f:
+            json.dump(config, f, indent=4)
+            f.flush()
+            os.fsync(f.fileno())  # Force write to disk
+        
+        # Now rename the temp file to the target file (atomic operation)
+        os.replace(temp_file, config_path)
+        
+        # Verify the file was saved correctly
+        file_size = os.path.getsize(config_path)
+        logger.info(f"Configuration saved successfully: {config_path} ({file_size} bytes)")
+        print(f"Configuration saved successfully: {config_path} ({file_size} bytes)")
+        
+        # Try to read back the saved file as an extra verification step
+        try:
+            with open(config_path, 'r') as f:
+                saved_config = json.load(f)
+            metrics_count = len(saved_config.get('metrics', []))
+            charts_count = len(saved_config.get('charts', []))
+            logger.info(f"Verified saved config: {metrics_count} metrics, {charts_count} charts")
+            print(f"Verified saved config: {metrics_count} metrics, {charts_count} charts")
+        except Exception as read_error:
+            logger.warning(f"Warning: Could not verify saved file: {str(read_error)}")
+            print(f"Warning: Could not verify saved file: {str(read_error)}")
+        
         return True
     except Exception as e:
-        logger.error(f"Error saving configuration to {config_path}: {str(e)}")
+        logger.error(f"Error saving configuration: {str(e)}")
+        print(f"Error saving configuration: {str(e)}")
+        logger.error(traceback.format_exc())
         return False
-
+    
 # Add a route specifically for debugging the configuration
 @app.route('/api/debug/config', methods=['GET'])
 def debug_config():
@@ -215,67 +236,6 @@ def debug_config():
         'current_config': load_config()
     }
     return jsonify(config_info)
-
-@app.route('/api/upload-csv', methods=['POST'])
-def upload_csv():
-    """Upload and process a CSV file."""
-    global uploaded_data, engine, dashboard_path
-    
-    if 'file' not in request.files:
-        return jsonify({
-            'status': 'error',
-            'message': 'No file part in the request'
-        })
-    
-    file = request.files['file']
-    
-    if file.filename == '':
-        return jsonify({
-            'status': 'error',
-            'message': 'No file selected'
-        })
-    
-    if file and file.filename.endswith('.csv'):
-        # Save the file temporarily
-        filepath = os.path.join(app.config['UPLOAD_FOLDER'], file.filename)
-        file.save(filepath)
-        
-        try:
-            # Process the CSV file
-            data = pd.read_csv(filepath, index_col=0, parse_dates=True)
-            
-            # Create a backtest engine
-            engine = Engine(data=data)
-            engine.run()
-            
-            # Generate dashboard
-            config = load_config()
-            dashboard_path = generate_dashboard(
-                engine=engine,
-                output_dir=app.config['UPLOAD_FOLDER'],
-                open_browser=False,
-                config_path=None  # Use the config we loaded
-            )
-            
-            # Store the data for later use
-            uploaded_data = data
-            
-            return jsonify({
-                'status': 'success',
-                'message': f'File {file.filename} uploaded and processed successfully.'
-            })
-        except Exception as e:
-            error_message = str(e)
-            logger.error(f"Error processing CSV: {error_message}")
-            return jsonify({
-                'status': 'error',
-                'message': f'Error processing file: {error_message}'
-            })
-    else:
-        return jsonify({
-            'status': 'error',
-            'message': 'Invalid file format. Please upload a CSV file.'
-        })
 
 def start_dashboard_editor(host='127.0.0.1', port=5000, debug=False):
     """Start the dashboard editor web server."""
